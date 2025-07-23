@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文章抠字工具 | 修复英文处理版</title>
+    <!-- 引入外部资源 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .text-area-height {
+                min-height: 200px;
+            }
+            .rule-item {
+                @apply p-3 border rounded-md mb-2 hover:bg-gray-50 transition-all duration-300;
+            }
+            .rule-item.active {
+                @apply border-blue-300 bg-blue-50;
+            }
+            .btn-effect {
+                @apply transform hover:scale-105 transition-all duration-200;
+            }
+            .file-error-detail {
+                @apply text-xs bg-red-50 p-2 rounded mt-1 border border-red-100;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 md:p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-6 md:p-8">
+        <!-- 标题 -->
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-2">文章抠字工具</h1>
+        <p class="text-center text-gray-600 mb-8">通过隐藏部分文字，生成"回忆训练题"，增强记忆力</p>
+
+        <!-- 输入区域 -->
+        <div class="mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700 flex items-center">
+                <i class="fa fa-file-text-o mr-2 text-blue-500"></i>1. 输入文章
+            </h2>
+            <!-- 文本输入框 -->
+            <textarea id="articleInput" class="w-full p-3 border border-gray-300 rounded-lg text-area-height focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="在此粘贴文章内容（或上传文件）..."></textarea>
+            
+            <!-- 文件上传 -->
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+                <label class="inline-flex items-center bg-blue-500 text-white px-4 py-2 rounded-md cursor-pointer hover:bg-blue-600 transition btn-effect">
+                    <i class="fa fa-upload mr-2"></i>上传文件（txt/docx）
+                    <input type="file" id="fileUpload" accept=".txt,.docx" class="hidden">
+                </label>
+                <span id="fileInfo" class="text-gray-500 text-sm"></span>
+                <div id="fileProgress" class="hidden text-sm text-gray-600">
+                    <i class="fa fa-spinner fa-spin mr-1"></i>正在解析文件...
+                </div>
+                <button id="clearInput" class="text-gray-600 hover:text-red-500 transition flex items-center btn-effect">
+                    <i class="fa fa-trash-o mr-1"></i> 清空
+                </button>
+            </div>
+            <p id="fileError" class="mt-2 text-red-500 text-sm hidden">文件解析失败，请尝试其他文件或直接粘贴文本</p>
+            <div id="errorDetails" class="file-error-detail hidden"></div>
+        </div>
+
+        <!-- 规则设置区域 -->
+        <div class="mb-8 p-4 bg-gray-50 rounded-lg">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700 flex items-center">
+                <i class="fa fa-sliders mr-2 text-blue-500"></i>2. 设置抠字规则
+            </h2>
+            
+            <!-- 替换文本设置 -->
+            <div class="mb-6 p-3 bg-white border border-gray-200 rounded-lg">
+                <label class="block font-medium text-gray-700 mb-2">替换文本（用于替换被抠掉的文字）</label>
+                <input type="text" id="replaceChar" value="[...]" class="w-full md:w-64 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如：[缺失]、***、___等">
+            </div>
+            
+            <!-- 规则选择 -->
+            <div class="space-y-4">
+                <!-- 间隔抠字 -->
+                <div class="rule-item active" onclick="selectRule('interval')">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="maskRule" value="interval" checked="" class="mr-2">
+                        <span class="font-medium">间隔抠字</span>
+                    </label>
+                    <div class="mt-2 ml-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <span>每隔</span>
+                            <input type="number" id="intervalNum" value="3" min="1" max="10" class="w-16 mx-2 p-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <span>个单位（汉字或英文单词）</span>
+                        </div>
+                        <div>
+                            <span>抠掉连续</span>
+                            <input type="number" id="maskLength" value="1" min="1" max="5" class="w-16 mx-2 p-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <span>个单位</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 随机抠字 -->
+                <div class="rule-item" onclick="selectRule('random')">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="radio" name="maskRule" value="random" class="mr-2">
+                        <span class="font-medium">随机抠字</span>
+                    </label>
+                    <div class="mt-2 ml-6">
+                        <input type="range" id="randomPercent" min="10" max="70" value="30" class="w-48 accent-blue-500">
+                        <span id="randomPercentText" class="ml-2">30%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 结果展示区域 -->
+        <div class="mb-8">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700 flex items-center">
+                <i class="fa fa-magic mr-2 text-blue-500"></i>3. 抠字结果
+            </h2>
+            
+            <div class="border border-gray-300 rounded-lg overflow-hidden">
+                <!-- 结果标签页 -->
+                <div class="flex border-b border-gray-200">
+                    <div class="flex-1 py-3 px-4 text-center font-medium bg-gray-50 border-r border-gray-200">模板1：正常抠字</div>
+                    <div class="flex-1 py-3 px-4 text-center font-medium bg-gray-50">模板2：反向抠字</div>
+                </div>
+                
+                <!-- 结果文本区域 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200">
+                    <!-- 模板1：正常抠字 -->
+                    <div id="resultText1" class="p-4 min-h-[150px] bg-white">
+                        请点击"生成抠字文本"按钮...
+                    </div>
+                    
+                    <!-- 模板2：反向抠字 -->
+                    <div id="resultText2" class="p-4 min-h-[150px] bg-white">
+                        请点击"生成抠字文本"按钮...
+                    </div>
+                </div>
+                
+                <!-- 操作按钮 -->
+                <div class="p-3 bg-gray-50 flex flex-wrap gap-3 justify-center">
+                    <button id="generateResult" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition btn-effect">
+                        <i class="fa fa-cog mr-1"></i> 生成抠字文本
+                    </button>
+                    <button id="showAnswer" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition btn-effect">
+                        <i class="fa fa-eye mr-1"></i> 显示原文（对照）
+                    </button>
+                    <button id="copyResult1" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 transition btn-effect">
+                        <i class="fa fa-copy mr-1"></i> 复制模板1
+                    </button>
+                    <button id="copyResult2" class="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 transition btn-effect">
+                        <i class="fa fa-copy mr-1"></i> 复制模板2
+                    </button>
+                    <button id="downloadResult1" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 transition btn-effect">
+                        <i class="fa fa-download mr-1"></i> 下载模板1
+                    </button>
+                    <button id="downloadResult2" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 transition btn-effect">
+                        <i class="fa fa-download mr-1"></i> 下载模板2
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 说明区域 -->
+        <div class="text-sm text-gray-500 bg-gray-50 p-3 rounded-lg italic">
+            <p class="mb-2"><i class="fa fa-info-circle text-blue-500 mr-1"></i>使用说明：</p>
+            <ul class="list-disc list-inside ml-2 space-y-1">
+                <li>生成抠字文本后，尝试回忆被隐藏的内容，再点击"显示原文"对照，增强记忆</li>
+                <li><strong>英文单词整体作为一个单位（相当于一个汉字）处理</strong></li>
+                <li>标点符号不会被抠除，会始终显示</li>
+                <li>模板1为正常抠字结果，模板2为反向抠字结果</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let originalText = '';
+        let currentResults = { template1: '', template2: '' };
+        // 标点符号集合（扩展更多符号）
+        const punctuation = new Set('，。,.;:!?！？“”‘’""()（）[]【】{}《》<>/\\|·…—- \t\n');
+        // 英文字符判断正则
+        const englishRegex = /[a-zA-Z0-9']/;
+
+        // 选择规则高亮
+        function selectRule(ruleValue) {
+            document.querySelectorAll('.rule-item').forEach(el => el.classList.remove('active'));
+            document.querySelector(`.rule-item:has(input[value="${ruleValue}"])`)?.classList.add('active');
+            document.querySelector(`input[name="maskRule"][value="${ruleValue}"]`).checked = true;
+        }
+
+        // 监听文件上传
+        document.getElementById('fileUpload').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            // 重置状态
+            document.getElementById('fileInfo').textContent = `处理中：${file.name}`;
+            document.getElementById('fileProgress').classList.remove('hidden');
+            document.getElementById('fileError').classList.add('hidden');
+            document.getElementById('errorDetails').classList.add('hidden');
+            
+            try {
+                if (file.name.endsWith('.txt')) {
+                    await handleTxtFile(file);
+                } else if (file.name.endsWith('.docx')) {
+                    await handleDocxFile(file);
+                } else {
+                    throw new Error('不支持的文件格式，仅支持txt和docx');
+                }
+                
+                document.getElementById('fileInfo').textContent = `已加载：${file.name} (${formatFileSize(file.size)})`;
+            } catch (err) {
+                handleFileError(file.name, err);
+            } finally {
+                document.getElementById('fileProgress').classList.add('hidden');
+                document.getElementById('fileUpload').value = '';
+            }
+        });
+
+        // 处理TXT文件
+        async function handleTxtFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        let content = event.target.result;
+                        if (content.startsWith('\ufeff')) {
+                            content = content.slice(1);
+                        }
+                        originalText = content;
+                        document.getElementById('articleInput').value = originalText;
+                        resolve();
+                    } catch (err) {
+                        reject(new Error('文件解析错误: ' + err.message));
+                    }
+                };
+                reader.onerror = () => reject(new Error('文件读取失败'));
+                reader.readAsText(file);
+            });
+        }
+
+        // 处理DOCX文件
+        async function handleDocxFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsArrayBuffer(file);
+                
+                reader.onload = async function(event) {
+                    try {
+                        const result = await mammoth.extractRawText({arrayBuffer: event.target.result});
+                        originalText = result.value;
+                        document.getElementById('articleInput').value = originalText;
+                        resolve();
+                    } catch (err) {
+                        reject(new Error('DOCX解析失败: ' + err.message));
+                    }
+                };
+                
+                reader.onerror = () => reject(new Error('文件读取失败'));
+            });
+        }
+
+        // 文件解析错误处理
+        function handleFileError(fileName, error) {
+            console.error('文件解析错误:', error);
+            document.getElementById('fileInfo').textContent = `解析失败：${fileName}`;
+            document.getElementById('fileError').classList.remove('hidden');
+            
+            const errorDetails = document.getElementById('errorDetails');
+            errorDetails.textContent = `错误详情: ${error.message || '未知错误'}`;
+            errorDetails.classList.remove('hidden');
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            else return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        // 清空输入
+        document.getElementById('clearInput').addEventListener('click', () => {
+            document.getElementById('articleInput').value = '';
+            document.getElementById('fileUpload').value = '';
+            document.getElementById('fileInfo').textContent = '';
+            document.getElementById('fileProgress').classList.add('hidden');
+            document.getElementById('fileError').classList.add('hidden');
+            document.getElementById('errorDetails').classList.add('hidden');
+            originalText = '';
+            document.getElementById('resultText1').textContent = '请点击"生成抠字文本"按钮...';
+            document.getElementById('resultText2').textContent = '请点击"生成抠字文本"按钮...';
+            currentResults = { template1: '', template2: '' };
+        });
+
+        // 随机抠字比例显示
+        const randomRange = document.getElementById('randomPercent');
+        const randomText = document.getElementById('randomPercentText');
+        randomRange.addEventListener('input', () => {
+            randomText.textContent = `${randomRange.value}%`;
+        });
+
+        /**
+         * 改进的文本分割算法 - 确保英文单词作为整体单位
+         * 将文本分割为三种单位：
+         * - 英文单词 (word)
+         * - 汉字/非英文单字符 (char)
+         * - 标点符号 (punctuation)
+         */
+        function splitIntoUnits(text) {
+            const units = [];
+            let currentWord = '';       // 存储当前英文单词
+            let currentChar = '';       // 存储当前非英文单字符
+            let inWhitespace = false;   // 是否在空白字符中
+            
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                
+                // 处理空白字符（空格、制表符、换行等）
+                if (punctuation.has(char) && /\s/.test(char)) {
+                    // 先处理之前的单词或字符
+                    if (currentWord) {
+                        units.push({ type: 'word', value: currentWord });
+                        currentWord = '';
+                    } else if (currentChar) {
+                        units.push({ type: 'char', value: currentChar });
+                        currentChar = '';
+                    }
+                    
+                    // 空白字符作为标点符号处理（保持文本结构）
+                    units.push({ type: 'punctuation', value: char });
+                    inWhitespace = true;
+                    continue;
+                }
+                
+                // 处理标点符号
+                if (punctuation.has(char) && !inWhitespace) {
+                    // 先处理之前的单词或字符
+                    if (currentWord) {
+                        units.push({ type: 'word', value: currentWord });
+                        currentWord = '';
+                    } else if (currentChar) {
+                        units.push({ type: 'char', value: currentChar });
+                        currentChar = '';
+                    }
+                    
+                    // 添加标点符号
+                    units.push({ type: 'punctuation', value: char });
+                    continue;
+                }
+                
+                // 重置空白状态
+                inWhitespace = false;
+                
+                // 处理英文字符（构成单词）
+                if (englishRegex.test(char)) {
+                    // 如果正在处理汉字，先添加
+                    if (currentChar) {
+                        units.push({ type: 'char', value: currentChar });
+                        currentChar = '';
+                    }
+                    // 添加到当前单词
+                    currentWord += char;
+                } else {
+                    // 处理非英文字符（主要是汉字）
+                    // 如果正在处理单词，先添加
+                    if (currentWord) {
+                        units.push({ type: 'word', value: currentWord });
+                        currentWord = '';
+                    }
+                    // 处理当前字符（汉字）
+                    if (currentChar) {
+                        units.push({ type: 'char', value: currentChar });
+                    }
+                    currentChar = char;
+                }
+            }
+            
+            // 添加最后剩余的单词或字符
+            if (currentWord) {
+                units.push({ type: 'word', value: currentWord });
+            } else if (currentChar) {
+                units.push({ type: 'char', value: currentChar });
+            }
+            
+            return units;
+        }
+
+        // 生成抠字结果
+        document.getElementById('generateResult').addEventListener('click', () => {
+            const inputText = document.getElementById('articleInput').value.trim();
+            if (!inputText) {
+                alert('请先输入文章内容！');
+                return;
+            }
+            originalText = inputText;
+            
+            // 获取替换文本
+            let replaceText = document.getElementById('replaceChar').value.trim();
+            if (!replaceText) {
+                replaceText = '[...]';
+                document.getElementById('replaceChar').value = replaceText;
+            }
+            
+            // 将文本分割为单位数组（关键改进点）
+            const units = splitIntoUnits(inputText);
+            console.log('分割后的单位:', units); // 调试用
+            
+            const rule = document.querySelector('input[name="maskRule"]:checked').value;
+            let maskInfo = {};
+            
+            try {
+                if (rule === 'interval') {
+                    const interval = parseInt(document.getElementById('intervalNum').value) || 3;
+                    const maskLength = parseInt(document.getElementById('maskLength').value) || 1;
+                    // 确保间隔大于等于抠除长度
+                    const validInterval = Math.max(interval, maskLength);
+                    maskInfo = maskByInterval(units, validInterval, maskLength, replaceText);
+                } else if (rule === 'random') {
+                    const percent = parseInt(document.getElementById('randomPercent').value) / 100 || 0.3;
+                    maskInfo = maskByRandom(units, percent, replaceText);
+                }
+
+                document.getElementById('resultText1').textContent = maskInfo.template1;
+                document.getElementById('resultText2').textContent = maskInfo.template2;
+                currentResults = maskInfo;
+            } catch (error) {
+                alert('生成失败，请重试');
+                console.error('生成错误:', error);
+            }
+        });
+
+        // 显示原文
+        document.getElementById('showAnswer').addEventListener('click', () => {
+            if (originalText) {
+                document.getElementById('resultText1').textContent = originalText;
+                document.getElementById('resultText2').textContent = originalText;
+            }
+        });
+
+        // 复制功能
+        function copyResult(template, buttonId) {
+            const text = currentResults[template] || document.getElementById(`resultText${template.replace('template', '')}`).textContent;
+            if (!text) return;
+
+            navigator.clipboard.writeText(text)
+                .then(() => {
+                    const btn = document.getElementById(buttonId);
+                    const original = btn.innerHTML;
+                    btn.innerHTML = '<i class="fa fa-check mr-1"></i> 已复制';
+                    setTimeout(() => btn.innerHTML = original, 2000);
+                })
+                .catch(() => alert('复制失败，请手动复制'));
+        }
+
+        document.getElementById('copyResult1').addEventListener('click', () => copyResult('template1', 'copyResult1'));
+        document.getElementById('copyResult2').addEventListener('click', () => copyResult('template2', 'copyResult2'));
+
+        // 下载功能
+        function downloadTemplate(templateNumber) {
+            if (!currentResults[`template${templateNumber}`]) {
+                alert(`请先生成抠字文本，再下载模板${templateNumber}！`);
+                return;
+            }
+            
+            const content = currentResults[`template${templateNumber}`];
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `抠字结果-模板${templateNumber}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        document.getElementById('downloadResult1').addEventListener('click', () => downloadTemplate(1));
+        document.getElementById('downloadResult2').addEventListener('click', () => downloadTemplate(2));
+
+        /**
+         * 间隔抠字算法（按单位处理）
+         * 修复：确保英文单词作为整体被抠除或保留
+         */
+        function maskByInterval(units, interval, maskLength, replaceText) {
+            const template1 = [];
+            const template2 = [];
+            let contentUnitCount = 0; // 只计数内容单位（汉字或单词）
+            
+            for (const unit of units) {
+                // 标点符号直接添加，不参与计数
+                if (unit.type === 'punctuation') {
+                    template1.push(unit.value);
+                    template2.push(unit.value);
+                    continue;
+                }
+                
+                // 内容单位（汉字或单词），参与抠字逻辑
+                contentUnitCount++;
+                // 计算当前单位是否需要被抠除
+                const shouldMask = (contentUnitCount - 1) % interval < maskLength;
+                
+                if (shouldMask) {
+                    // 抠掉的单位
+                    template1.push(replaceText);
+                    template2.push(unit.value);
+                } else {
+                    // 保留的单位
+                    template1.push(unit.value);
+                    template2.push(replaceText);
+                }
+            }
+            
+            return { template1: template1.join(''), template2: template2.join('') };
+        }
+
+        /**
+         * 随机抠字算法（按单位处理）
+         * 修复：确保英文单词作为整体被随机选择
+         */
+        function maskByRandom(units, percent, replaceText) {
+            const template1 = [];
+            const template2 = [];
+            
+            for (const unit of units) {
+                // 标点符号直接添加，不参与随机抠字
+                if (unit.type === 'punctuation') {
+                    template1.push(unit.value);
+                    template2.push(unit.value);
+                } else {
+                    // 内容单位（汉字或单词）参与随机抠字
+                    const shouldMask = Math.random() < percent;
+                    if (shouldMask) {
+                        template1.push(replaceText);
+                        template2.push(unit.value);
+                    } else {
+                        template1.push(unit.value);
+                        template2.push(replaceText);
+                    }
+                }
+            }
+            
+            return { template1: template1.join(''), template2: template2.join('') };
+        }
+
+        // 初始化
+        window.onload = () => {
+            // 示例文本，方便测试英文处理
+            const demoText = "我爱学习 English，它很 interesting。Learning new words is important。";
+            document.getElementById('articleInput').value = demoText;
+            originalText = demoText;
+        };
+    </script>
+</body>
+</html>
+    
